@@ -663,6 +663,12 @@ class FullModelHFCheckpointer(_CheckpointerInterface):
             converted_state_dict[training.MODEL_KEY] = llama4_hf_to_tune(
                 merged_state_dict,
             )
+        elif self._model_type == ModelType.DOCEV:
+            from torchtune.models.docev._convert_weights import docev_hf_to_tune
+
+            converted_state_dict[training.MODEL_KEY] = docev_hf_to_tune(
+                merged_state_dict,
+            )
         else:
             converted_state_dict[training.MODEL_KEY] = convert_weights.hf_to_tune(
                 merged_state_dict,
@@ -774,6 +780,12 @@ class FullModelHFCheckpointer(_CheckpointerInterface):
                 state_dict[training.MODEL_KEY] = llama4_tune_to_hf(
                     state_dict[training.MODEL_KEY],
                 )
+            elif self._model_type == ModelType.DOCEV:
+                from torchtune.models.docev._convert_weights import docev_tune_to_hf
+
+                state_dict[training.MODEL_KEY] = docev_tune_to_hf(
+                        state_dict[training.MODEL_KEY],
+                    )
             else:
                 state_dict[training.MODEL_KEY] = convert_weights.tune_to_hf(
                     state_dict[training.MODEL_KEY],
