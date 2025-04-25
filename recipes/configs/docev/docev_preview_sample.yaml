@@ -12,7 +12,7 @@ output_dir: /app/docfm/checkpoints/training/torchtune/docev_preview_test # outpu
 model:
   _component_: torchtune.models.docev.docev_preview
   image_token_id: 64000 # image token id for the tokenizer
-  decoder_trainable: False # whether to train the decoder
+  decoder_trainable: True # whether to train the decoder
   encoder_trainable: True # whether to train the encoder
   fusion_trainable: True # whether to train the fusion layers (additional token embeddings and connector)
 
@@ -49,7 +49,7 @@ dataloader:
   shuffle: True # whether to shuffle the data
   collate_fn: torchtune.models.docev._collate.padded_collate_tiled_images_and_mask # collate function to use
   parallel_method: thread # method to use for parallelism. Default is "thread".
-  num_workers: 8  # Number of workers to use for loading the dataset. Default is 0 (no parallelism). Setting this
+  num_workers: 4  # Number of workers to use for loading the dataset. Default is 0 (no parallelism). Setting this
   pin_memory: true # whether to pin memory. Default is False.
   packed: False # Set to true for great speed ups
   prefetch_factor: 4 # number of batches to prefetch. Default is 4.
@@ -59,19 +59,20 @@ datasets:
   - source: /app/docfm/datasets/public_dataset/vl3_syn7m/raw_ufx # source of the dataset
     transform:
       _component_: torchtune.datasets.multimodal._ufx.ufx_transform # transform to use for the dataset
+      context_col: "context" # for ufx instruction
     weight: 1.0 # dataset training proportion; 1.0 represents full dataset weight
 
 # Fine-tuning arguments
 epochs: 1
 # max_steps_per_epoch is required for progress bar
-max_steps_per_epoch: 10000 # for testing. If null, the number of steps is the number of batches in the dataset.
+max_steps_per_epoch: null # for testing. If null, the number of steps is the number of batches in the dataset.
 batch_size: 1 # support batch_size 1 only
 gradient_accumulation_steps: 32
 optimizer:
   _component_: torch.optim.AdamW
   fused: True
   weight_decay: 0.0
-  lr: 1e-4
+  lr: 1e-5
 optimizer_in_bwd: False  # True saves memory. Requires gradient_accumulation_steps=1
 
 lr_scheduler:
@@ -97,5 +98,5 @@ metric_logger:
   project: torchtune
   group: test
   name: experiment-docev-preview-ufx-dataset
-log_every_n_steps: 10
+log_every_n_steps: 1
 log_peak_memory_stats: True
