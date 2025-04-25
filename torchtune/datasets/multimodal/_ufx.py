@@ -5,7 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import os
-from typing import Any, Callable, Dict, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, Mapping, Optional, Tuple, List
 
 from torchtune.data._messages import Message
 from torchtune.datasets._sft import SFTDataset, SFTTransform
@@ -103,99 +103,91 @@ class UfxToMessages(Transform):
         self.image_special_token = image_special_token
         self.new_system_prompt = new_system_prompt
         self.min_image_size = min_image_size
-        if column_map is not None:
-            if "image_files" not in column_map:
-                raise ValueError(
-                    "column_map must map 'image_files' to your expected column name if specified"
-                )
-            if "context" not in column_map:
-                raise ValueError(
-                    "column_map must map 'context' to your expected column name if specified"
-                )
-            self._column_map = column_map
-        else:
-            self._column_map = {"context": "context", "image_files": "image_files"}
+        self._column_map = column_map or {"context": "context", "image_files": "image_files"}
+        if column_map:
+            for key in ("context", "image_files"):
+                if key not in column_map:
+                    raise ValueError(f"column_map must map '{key}' to your expected column name if specified")
+        self.ufx_type = {"context": "instruction", "text": "pretraining"}
 
     def __call__(self, sample: Mapping[str, Any]) -> Mapping[str, Any]:
-        valid_data = True
-        # Dataset images to be prepended to the first user message
-        img_content = []
-        for img_file in sample[self._column_map["image_files"]]:
-            try:
-                image_tensor = load_image(img_file)
-                _, H, W = image_tensor.shape
-                image_pixels = H * W
-                min_pixels = self.min_image_size[0] * self.min_image_size[1]
-                if image_pixels < min_pixels:
-                    print(f"Image {img_file} size {image_tensor.shape} ({image_pixels} pixels) is smaller than minimum {self.min_image_size} ({min_pixels} pixels). This sample will be ignored.")
-                    image_tensor = None
-                    valid_data = False
-            except Exception as e:
-                print(f"Error loading image {img_file}: {e}. This sample will be ignored.")
-                image_tensor = None
-                valid_data = False
-            if valid_data:
-                img_content.append(image_tensor)
+        # Load and validate images
+        images, valid_data = self._load_and_validate_images(sample)
 
-        # Convert to messages
-        messages = []
-        for message in sample[self._column_map["context"]]:
-            role = message["role"]
-            content = []
-            content_item = message["content"]
-            if isinstance(content_item, str):
-                # context format type 1
-                if self.image_special_token in content_item:
-                    # count the number of image special tokens
-                    img_count = content_item.count(self.image_special_token)
-                    if len(img_content) != img_count:
-                        print(f"Image count mismatch: {len(img_content)} != {img_count}. This sample will be ignored.")
-                        valid_data = False
-                    else:
-                        for _ in range(img_count):
-                            content.append({"type": "image", "content": img_content.pop(0)})
+        # Build message list
+        raw_context = sample[self._column_map["context"]]
+        messages = self._build_messages(raw_context, images)
 
-                    content_item = content_item.replace(self.image_special_token, "") # remove image special token
-                content.append({"type": "text", "content": content_item})
-            elif isinstance(content_item, list):
-                img_count = [cont["type"] == "image" for cont in content_item].count(True)
-                if len(img_content) != img_count:
-                    print(f"Image count mismatch: {len(img_content)} != {img_count}. This sample will be ignored.")
-                    valid_data = False
-                else:
-                    for cont in content_item:
-                        # context format type 2
-                        if cont["type"] == "image":
-                            content.append({"type": "image", "content": img_content.pop(0)})
-                        else:
-                            content.append({"type": "text", "content": cont["content"]})
-            else:
-                raise ValueError(f"Unknown content_item type: {type(content_item)}")
-
-            if role == "assistant":
-                messages.append(
-                    Message(
-                        role=role,
-                        content=content,
-                    )
-                )
-            else:
-                messages.append(
-                    Message(
-                        role=role,
-                        content=content,
-                        masked=True,
-                    )
-                )
-
-        if self.new_system_prompt is not None:
-            messages = [
-                Message(
-                    role="system", content=self.new_system_prompt, masked=True, eot=True
-                )
-            ] + messages
+        # Prepend system prompt if provided
+        if self.new_system_prompt:
+            system_msg = Message(
+                role="system", content=self.new_system_prompt, masked=True, eot=True
+            )
+            messages.insert(0, system_msg)
 
         return {"messages": messages, "valid_data": valid_data}
+
+    def _load_and_validate_images(self, sample: Mapping[str, Any]) -> Tuple[List[Any], bool]:
+        img_files = sample[self._column_map["image_files"]]
+        loaded = []
+        valid_data = True
+        for path in img_files:
+            try:
+                img = load_image(path)
+                _, H, W = img.shape
+                if H * W < (self.min_image_size[0] * self.min_image_size[1]):
+                    print(f"Ignoring small image: {path} {img.shape}")
+                    valid_data = False
+                loaded.append(img)
+            except Exception as e:
+                print(f"Error loading {path}: {e}")
+                valid_data = False
+        return loaded, valid_data
+
+    def _build_messages(self, context: List[Dict[str, Any]], images: List[Any]) -> List[Message]:
+        messages = []
+        ufx_type = self.ufx_type[self._column_map["context"]]
+        for entry in context:
+            role, content_items = self._interpret_entry(entry, ufx_type)
+            content, masked = self._assemble_content(content_items, images, role)
+            msg = Message(role=role, content=content, masked=masked)
+            messages.append(msg)
+        return messages
+
+    def _interpret_entry(self, entry: Dict[str, Any], ufx_type: str) -> Tuple[str, Any]:
+        if ufx_type == "instruction":
+            return entry["role"], entry["content"]
+        # pretraining format: treat as assistant message following empty user
+        return (
+            "assistant",
+            entry.get("text", ""),
+        )
+
+    def _assemble_content(self, content_item: Any, images: List[Any], role: str) -> Tuple[List[Dict[str, Any]], bool]:
+        content_list = []
+        masked = role != "assistant"
+
+        if isinstance(content_item, str):  # format type 1
+            image_count = content_item.count(self.image_special_token)
+            if image_count and len(images) == image_count:
+                for _ in range(image_count):
+                    content_list.append({"type": "image", "content": images.pop(0)})
+                content_item = content_item.replace(self.image_special_token, "")
+            content_list.append({"type": "text", "content": content_item})
+        elif isinstance(content_item, list):  # format type 2
+            expected_imgs = sum(1 for c in content_item if c.get("type") == "image")
+            if expected_imgs and len(images) == expected_imgs:
+                for part in content_item:
+                    if part.get("type") == "image":
+                        content_list.append({"type": "image", "content": images.pop(0)})
+                    else:
+                        content_list.append({"type": "text", "content": part.get("content", "")})
+            else:
+                raise ValueError("Image count mismatch")
+        else:
+            raise ValueError(f"Unsupported content_item type: {type(content_item)}")
+
+        return content_list, masked
 
 
 def ufx_dataset(
