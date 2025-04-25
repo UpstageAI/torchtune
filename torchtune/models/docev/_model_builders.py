@@ -134,7 +134,6 @@ def docev_preview(
         fusion_trainable=fusion_trainable,
     )
 
-
 def lora_docev_preview(
     lora_attn_modules: List[LORA_ATTN_MODULES],
     image_token_id: int,
@@ -175,8 +174,6 @@ def lora_docev_preview(
         quantize_base: (bool): Whether to quantize base model weights or not. Only applied to base
             weights within linear layers LoRA is applied to. The final output linear projection is not
             supported for quantization currently.
-        image_size (int): Base image size that images will be tiled and resized to.
-            Default is 560 for Instruct weights, use 448 for pre-trained.
 
     Returns:
         EarlyFusionModel: Instantiation of DocEV Preview model with LoRA applied to
@@ -205,7 +202,7 @@ def lora_docev_preview(
         clip_embed_dim=1152,
         clip_hidden_dim=4304,
         clip_num_layers=27,
-        clip_hidden_states=[24, 25, 26, 27],
+        clip_hidden_states=[24, 25, 26],
         cls_output_dim=1152,
         append_cls_token=False,
         output_cls_projection=False,
@@ -220,6 +217,7 @@ def lora_docev_preview(
         use_dora=use_dora,
         quantize_base=quantize_base,
         connector_type="ldp_v2",
+        vision_feature_select_strategy="full",
     )
 
     decoder = lora_docev_solar_decoder(
