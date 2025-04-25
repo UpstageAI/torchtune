@@ -908,7 +908,15 @@ class FullFinetuneRecipeDistributed(FTRecipeInterface):
                 if current_num_tokens != 0:
                     current_loss = self._loss_fn(logits, labels) * current_num_tokens
                 else:
-                    current_loss = torch.tensor(0.0, device=self._device, requires_grad=True)
+                    # 학습할 토큰이 없는 경우 모델 그래프와 연결된 dummy loss 발생: gradient hook을 보장합니다.
+                    # logits이 tensor인지 list인지 확인해서 모두 합친 뒤 dummy loss 생성
+                    if isinstance(logits, list):
+                        # 리스트 안의 모든 텐서를 먼저 합산
+                        dummy = sum(t.sum() for t in logits)
+                    else:
+                        dummy = logits.sum()
+                    # 그래프는 연결하지만 실제 값은 0인 loss
+                    current_loss = dummy * 0
 
                 # free logits otherwise it peaks backward memory
                 del logits
@@ -957,10 +965,11 @@ class FullFinetuneRecipeDistributed(FTRecipeInterface):
                         loss_to_log = running_loss.item() / num_tokens
                     else:
                         loss_to_log = 0
-                    pbar.update(1)
+
                     pbar.set_description(
-                        f"{curr_epoch + 1}|{self.global_step}|Loss: {loss_to_log}"
+                        f"{curr_epoch + 1}|{self.global_step}|Loss: {loss_to_log}", refresh=False
                     )
+                    pbar.update(1) # log 한번만 출력
 
                     # Log per-step metrics
                     if (
