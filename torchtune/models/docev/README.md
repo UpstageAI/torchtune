@@ -26,21 +26,20 @@
 │  TokenPosEmbedding   avg_pool2d     → Packed Sequence             → Decoder layers      │
 │  Transformers × N     PEG conv                                                          │
 └─────────────────────────────────────────────────────────────────────────────────────────┘
-    ▲                     ▲                         ▲
-    │                     │                         │
-    │                     │                         │
-    │        ┌──────────────────────────────────────┴──────────────────────────┐
-    │        │             1. Data Pipeline                                    │
-    └──────▶ │ Raw Sample → UfxToMessages → DocEVTransform → Collate → Inputs  │
-             └─────────────────────────────────────────────────────────────────┘
-
+                                          ▲
+                                          │
+     ┌────────────────────────────────────┴────────────────────────────┐
+     │             1. Data Pipeline                                    │
+     │ Raw Sample → UfxToMessages → DocEVTransform → Collate → Inputs  │
+     └─────────────────────────────────────────────────────────────────┘
+                                          ▲
+                                          │
 ┌────────────────────────────────────────────────────────────────────────┐
 │                  4. Utilities & Conversion (Side‑Box)                  │
 ├────────────────────────────────────────────────────────────────────────┤
 │ • docev_hf_to_tune(state_dict) ↔ HuggingFace ↔ torchtune 형식 변환       │
 │ • docev_tune_to_hf(state_dict) ↔ torchtune ↔ HuggingFace               │
 │ • _utils.py: select_best_resolution(), get_padding(), unpad_image(),...│
-│ • _transform.py: UfxToMessages, Message ↔ tensor glue 로직              │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 ## 1. Data Pipeline
