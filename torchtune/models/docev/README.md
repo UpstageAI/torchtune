@@ -1,3 +1,48 @@
+# Install
+
+아래 순서에 따라 필수 패키지를 설치하세요:
+
+- **PyTorch**: cu12.6 nightly 버전 설치
+  ```bash
+  pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu126
+  ```
+- **TorchTune**: 소스 설치 (UpstageAI/torchtune 리포지토리, `docev` 브랜치)
+  ```bash
+  git clone --branch docev git@github.com:UpstageAI/torchtune.git  # TorchTune 저장소 클론 (docev 브랜치)
+  cd torchtune
+  pip install -e .
+  ```
+
+자세한 설치 가이드는 [TorchTune Install Guide](https://pytorch.org/torchtune/stable/install.html)에서 확인할 수 있습니다.
+
+
+# Training
+
+### 🚀 Single-Node Training
+
+1, 2, 4, 8 GPU에서 학습을 실행하려면:
+
+```bash
+torchrun --nproc_per_node {1|2|4|8} \
+  recipes/dev/full_finetune_distributed_ufx_dataset.py \
+  --config configs/docev/docev_preview_sample.yaml
+```
+
+### 🔗 Distributed Multi-Node Training
+
+`torchtune_distributed_train.sh` 스크립트를 사용하여 다중 노드 분산 학습을 설정할 수 있습니다:
+
+- **SCRIPT_PATH**: 분산 학습 스크립트 경로 (`torchtune_distributed_train.sh`)
+- **BASE_DIR**: TorchTune 루트 디렉토리
+- **CONDA_ENV_NAME**, **CONDA_ROOT**, **SSH_USER**: Conda 환경 및 SSH 사용자 설정
+- **NNODES**, **MASTER_NODE**, **MASTER_ADDR**, **MASTER_PORT**, **NPROC_PER_NODE**, **NODES**: 분산 학습 노드 구성
+- **NCCL_IFACE**: NCCL 통신에 사용할 네트워크 인터페이스
+- **CONFIG_PATH**, **SCRIPT_PATH**: 학습 설정 파일 및 실행 스크립트 경로
+- **LOG_DIR**, **RUN_NAME**: 각 노드별 로그 및 PID 파일 관리 경로
+
+스크립트는 각 노드에 SSH로 접속해 `torchrun` 명령을 백그라운드로 실행하며, 로그 파일(`.log`)과 PID 파일(`.pid`)을 생성합니다. 학습 상태를 모니터링하거나 종료할 때 유용합니다.
+
+
 # System Architecture
 
 ```text
