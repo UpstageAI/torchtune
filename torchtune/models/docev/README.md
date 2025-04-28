@@ -4,10 +4,20 @@
 
 - **PyTorch**: cu12.6 nightly 버전 설치
   ```bash
-  pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu126
+  user@my-server ~ $
+
+  # 작업용 파이썬 가상 환경 설치
+  conda create -n torchtune python=3.11
+  conda activate torchtune
+
+  # 필수 라이브러리 설치
+  pip install --pre torch torchvision torchao --index-url https://download.pytorch.org/whl/nightly/cu126 # full options are cpu/cu118/cu121/cu124/cu126
+  pip install transformers wandb
   ```
 - **TorchTune**: 소스 설치 (UpstageAI/torchtune 리포지토리, `docev` 브랜치)
   ```bash
+  user@my-server ~ $
+
   git clone --branch docev git@github.com:UpstageAI/torchtune.git  # TorchTune 저장소 클론 (docev 브랜치)
   cd torchtune
   pip install -e .
@@ -23,9 +33,13 @@
 1, 2, 4, 8 GPU에서 학습을 실행하려면:
 
 ```bash
-torchrun --nproc_per_node {1|2|4|8} \
+user@my-server ~/torchtune (docev) $
+
+# GPU 4개를 이용하여 학습하는 경우
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \
+  --nproc_per_node 4 \
   recipes/dev/full_finetune_distributed_ufx_dataset.py \
-  --config configs/docev/docev_preview_sample.yaml
+  --config recipes/configs/docev/docev_preview_sample.yaml
 ```
 
 ### 🔗 Distributed Multi-Node Training
