@@ -76,11 +76,13 @@ class DocEVTransform(ModelTokenizer, Transform):
         apply_random_sampling_ratio: bool = True,
         max_seq_len: Optional[int] = None,
         chat_template: Optional[str] = None,
+        ufx_type: Literal["instruction", "pretraining"] = "instruction",
     ):
         self.patch_size = patch_size
         self.tile_size = tile_size
 
         self.vision_feature_select_strategy = vision_feature_select_strategy
+        self.ufx_type = ufx_type
         # Init Image Processor
         tile_range = range(max_num_tiles + 1)
         # A list of possible resolutions in the format [(height1, width1), (height2, width2), ...].
@@ -101,6 +103,11 @@ class DocEVTransform(ModelTokenizer, Transform):
         self.max_seq_len = max_seq_len
         self.image_token = image_token
         self.tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
+        # sanity check bos, eos token exists
+        if self.tokenizer.bos_token is None:
+            raise ValueError("bos_token is not in the tokenizer")
+        if self.tokenizer.eos_token is None:
+            raise ValueError("eos_token is not in the tokenizer")
         self._base_vocab_size = self.tokenizer.vocab_size
         # Add image_token. If image_token is already in the tokenizer, it will not be added again.
         self.tokenizer.add_tokens(AddedToken(self.image_token, special=True, normalized=False), special_tokens=True)
@@ -302,10 +309,18 @@ class DocEVTransform(ModelTokenizer, Transform):
         for message in messages:
             # Convert the message to chat template
             chat_item = self.message_to_chat_item(message, sampling_ratio)
-            # Get chat template text
-            chat_text = self.tokenizer.apply_chat_template(
-                chat_item["chat_template"], tokenize=False, add_generation_prompt=inference, chat_template=self.chat_template
-            )
+            if self.ufx_type == "instruction":
+                # Get chat template text
+                chat_text = self.tokenizer.apply_chat_template(
+                    chat_item["chat_template"], tokenize=False, add_generation_prompt=inference, chat_template=self.chat_template
+                )
+            else:
+                # pretraining format : all messages in the chat template are concatenated into a single continuous text stream
+                content_parts = [
+                    self.image_token if item['type'] == 'image' else item['text'] for template in chat_item['chat_template'] for item in template['content']
+                ]
+                chat_text = ''.join(content_parts)
+
             # Replace image_token with placeholder which is the number of visual tokens
             for num_image_token in chat_item["num_image_tokens"]:
                 chat_text = chat_text.replace(self.image_token, "<|placeholder|>" * num_image_token, 1)
@@ -319,6 +334,10 @@ class DocEVTransform(ModelTokenizer, Transform):
             mask.extend([message.masked] * len(encoded_token)) # If masked, ignore the token during loss calculation
             encoder_input["images"].extend(chat_item["images"])
             encoder_input["image_sizes"].extend(chat_item["image_sizes"])
+        if self.ufx_type == "pretraining":
+            tokens = [self.tokenizer.bos_token_id] + tokens + [self.tokenizer.eos_token_id]
+            # pretraining format does not have mask : train all tokens
+            mask = [False] * len(tokens)
         if self.max_seq_len is not None and len(tokens) > self.max_seq_len:
             tokens = tokens[:self.max_seq_len]
             mask = mask[:self.max_seq_len]

@@ -33,6 +33,7 @@ def docev_preview_transform(
     apply_random_sampling_ratio: bool,
     max_seq_len: int,
     chat_template: Optional[str],
+    ufx_type: Literal["instruction", "pretraining"],
 ) -> DocEVTransform:
     """
     Data Transforms (including Tokenizer) for DocEV.
@@ -68,6 +69,7 @@ def docev_preview_transform(
         apply_random_sampling_ratio=apply_random_sampling_ratio,
         max_seq_len=max_seq_len,
         chat_template=chat_template,
+        ufx_type=ufx_type,
     )
 
 
