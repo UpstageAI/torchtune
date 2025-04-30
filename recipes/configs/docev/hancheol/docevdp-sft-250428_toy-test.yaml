@@ -11,7 +11,7 @@ metric_logger:
   _component_: torchtune.training.metric_logging.WandBLogger
   log_dir: ${output_dir}/logs
   project: torchtune
-  group: DocEV-DP
+  group: docev_dp_test
   name: docevdp-sft-250428_toy-test
 log_every_n_steps: 1
 log_peak_memory_stats: True
@@ -73,12 +73,12 @@ datasets:
       _component_: torchtune.datasets.multimodal._ufx.ufx_transform
       context_col: "context"
     weight: 1.0
-    ratio: 0.001 # 3M * ratio
+    ratio: 0.003 # 3M * ratio
 
 # Fine-tuning arguments
-epochs: 1 # overfitting 테스트를 위해서 2회 반복
+epochs: 3 # overfitting 테스트를 위해서 2회 반복
 # max_steps_per_epoch is required for progress bar
-max_steps_per_epoch: null # for testing. If null, the number of steps is the number of batches in the dataset.
+max_steps_per_epoch: 10
 batch_size: 1 # support batch_size 1 only
 gradient_accumulation_steps: 64
 optimizer:
