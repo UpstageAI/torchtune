@@ -12,12 +12,12 @@ metric_logger:
   log_dir: ${output_dir}/logs
   project: torchtune
   group: docev_dp_test
-  name: docevdp-sft-250428_toy-test
+  name: docevdp_sft_250428-overfitting_test
 log_every_n_steps: 1
 log_peak_memory_stats: True
 
 # Output directory
-output_dir: /app/docfm/checkpoints/training/torchtune/docevdp-sft-250428_toy-test
+output_dir: /app/docfm/checkpoints/training/torchtune/docevdp_sft_250428-overfitting_test
 
 # Model arguments
 model:

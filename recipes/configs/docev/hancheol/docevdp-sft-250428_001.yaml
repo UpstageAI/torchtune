@@ -12,12 +12,12 @@ metric_logger:
   log_dir: ${output_dir}/logs
   project: torchtune
   group: docev_dp
-  name: docevdp-sft-250428_001
+  name: docevdp_sft_250428_001
 log_every_n_steps: 1
 log_peak_memory_stats: True
 
 # Output directory
-output_dir: /app/docfm/checkpoints/training/torchtune/docevdp-sft-250428_001 # output directory to save checkpoints and logs
+output_dir: /app/docfm/checkpoints/training/torchtune/docevdp_sft_250428_001
 
 # Model arguments
 model:
