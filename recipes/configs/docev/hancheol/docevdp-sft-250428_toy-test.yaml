@@ -72,10 +72,11 @@ datasets:
     transform:
       _component_: torchtune.datasets.multimodal._ufx.ufx_transform
       context_col: "context"
-    weight: 0.01 # 3M => 100K (single node 일 경우, total batch size 512이니, 100000/512 = 195 steps 학습)
+    weight: 1.0
+    ratio: 0.001 # 3M * ratio
 
 # Fine-tuning arguments
-epochs: 1
+epochs: 1 # overfitting 테스트를 위해서 2회 반복
 # max_steps_per_epoch is required for progress bar
 max_steps_per_epoch: null # for testing. If null, the number of steps is the number of batches in the dataset.
 batch_size: 1 # support batch_size 1 only
@@ -89,7 +90,7 @@ optimizer_in_bwd: False  # True saves memory. Requires gradient_accumulation_ste
 
 lr_scheduler:
   _component_: torchtune.training.lr_schedulers.get_cosine_schedule_with_warmup
-  num_warmup_steps: 100
+  num_warmup_steps: 10
 
 loss:
   _component_: torchtune.modules.loss.CEWithChunkedOutputLoss

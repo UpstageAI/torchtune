@@ -3,19 +3,17 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
+import math
 import os
-import gc
+import random
 import sys
 import time
-import math
-import random
-
 from functools import partial
 from typing import Any, Dict, List, Optional, Union
 from warnings import warn
 
 import torch
-from datasets import load_dataset, load_from_disk, concatenate_datasets
+from datasets import concatenate_datasets, load_dataset, load_from_disk
 from datasets.distributed import split_dataset_by_node
 from omegaconf import DictConfig, ListConfig
 from torch import nn
@@ -44,76 +42,6 @@ from torchtune.utils import get_world_size_and_rank
 
 log = utils.get_logger("DEBUG")
 
-
-class DistributedBucketSampler(Sampler):
-    """
-    버킷 배칭 + 다중 노드 분할 샘플러
-    - lengths: dataset['length']
-    - batch_size: 노드당 batch size
-    - world_size, rank: 분산 환경 정보
-    - bucket_size: 버킷당 (world_size * batch_size * bucket_mul)
-    - shuffle: epoch마다 셔플
-    - seed: 기본 시드
-    """
-    def __init__(self,
-                 lengths,
-                 batch_size: int,
-                 world_size: int,
-                 rank: int,
-                 bucket_size: int,
-                 shuffle: bool = True,
-                 seed: int = 0):
-        self.lengths     = lengths
-        self.batch_size  = batch_size
-        self.world_size  = world_size
-        self.rank        = rank
-        self.bucket_size = bucket_size
-        self.shuffle     = shuffle
-        self.seed        = seed
-        self.epoch       = 0
-        self.indices     = list(range(len(lengths)))
-
-    def __iter__(self):
-        # 1) 길이 기준 정렬
-        sorted_idx = sorted(self.indices, key=lambda i: self.lengths[i])
-        # 2) 버킷으로 분할
-        buckets = [
-            sorted_idx[i : i + self.bucket_size]
-            for i in range(0, len(sorted_idx), self.bucket_size)
-        ]
-        # 3) 버킷 순서 셔플
-        if self.shuffle:
-            random.seed(self.seed + self.epoch)
-            random.shuffle(buckets)
-        # 4) 각 버킷 내부 셔플
-        for b in buckets:
-            if self.shuffle:
-                random.shuffle(b)
-        # 5) 배치 단위로 쪼개기 → 완전한 배치만
-        batches = []
-        for b in buckets:
-            for i in range(0, len(b), self.batch_size):
-                batch = b[i : i + self.batch_size]
-                if len(batch) == self.batch_size:
-                    batches.append(batch)
-        # 6) 노드별 할당
-        my_batches = batches[self.rank :: self.world_size]
-        # 7) flatten해서 인덱스 단위로 yield
-        for batch in my_batches:
-            for idx in batch:
-                yield idx
-
-    def __len__(self):
-        # 노드당 처리할 샘플 수
-        total_batches = sum(
-            (min(self.bucket_size, len(self.indices) - i) // self.batch_size)
-            for i in range(0, len(self.indices), self.bucket_size)
-        )
-        my_batches = total_batches // self.world_size
-        return my_batches * self.batch_size
-
-    def set_epoch(self, epoch: int):
-        self.epoch = epoch
 
 class FullFinetuneRecipeDistributed(FTRecipeInterface):
     """
@@ -460,6 +388,7 @@ class FullFinetuneRecipeDistributed(FTRecipeInterface):
         # by the dataloader, the max_steps_per_epoch param set by the user and the
         # gradient_accumulation_steps param. This value is used for logging and tracking
         # training state. The computation should happen after the dataloader has been setup
+
         self._steps_per_epoch = (
             self._len_datasets // self._gradient_accumulation_steps // self._batch_size
         )
@@ -470,6 +399,7 @@ class FullFinetuneRecipeDistributed(FTRecipeInterface):
             self._steps_per_epoch = self.max_steps_per_epoch
 
         self.global_step = self.epochs_run * self._steps_per_epoch
+
         # Setup lr scheduler
         self._lr_scheduler = self._setup_lr_scheduler(
             cfg_lr_scheduler=cfg.get("lr_scheduler", None),
@@ -803,7 +733,6 @@ class FullFinetuneRecipeDistributed(FTRecipeInterface):
         pin_memory = cfg_dataloader.get("pin_memory", True)
         collate_fn = cfg_dataloader.collate_fn
         prefetch_factor = cfg_dataloader.get("prefetch_factor", 6)
-        merge_datasets = cfg_dataloader.get("merge_datasets", False)
 
         if packed:
             raise ValueError("Packing not yet supported")
@@ -814,7 +743,6 @@ class FullFinetuneRecipeDistributed(FTRecipeInterface):
         )
         weights, datasets = {}, {}
         len_datasets = 0
-        dataset_list = []
         for idx, cfg_dataset in enumerate(cfg_datasets):
             dataset_name = cfg_dataset.pop("name", None)
             if dataset_name is None:
@@ -856,6 +784,10 @@ class FullFinetuneRecipeDistributed(FTRecipeInterface):
             if ratio < 1.0:
                 dataset = dataset.select(range(int(len(dataset) * ratio)))
 
+            ratio = cfg_dataset.get("ratio", 1.0)
+            if ratio < 1.0:
+                dataset = dataset.select(range(int(len(dataset) * ratio)))
+
             if merge_datasets:
                 # Collect all datasets and concatenate them before proceeding with further processing
                 dataset_list.append(dataset)
@@ -873,27 +805,13 @@ class FullFinetuneRecipeDistributed(FTRecipeInterface):
                     dataset = dataset.shuffle(seed=self.seed)
                 node = IterableWrapper(dataset)
             else:
-                if cfg_dataloader.get("bucket_ratio", 0) > 0:
-                    # 버킷 샘플러로 교체
-                    bucket_size = world_size * batch_size * cfg_dataloader.get("bucket_ratio", 50)
-                    sampler = DistributedBucketSampler(
-                        lengths=dataset["length"],
-                        batch_size=batch_size,
-                        world_size=world_size,
-                        rank=rank,
-                        bucket_size=bucket_size,
-                        shuffle=ds_shuffle,
-                        seed=self.seed,
-                    )
-                else:
-                    sampler = DistributedSampler(
-                        dataset,
-                        num_replicas=world_size,
-                        rank=rank,
-                        shuffle=ds_shuffle,
-                        seed=self.seed,
-                    )
-
+                sampler = DistributedSampler(
+                    dataset,
+                    num_replicas=world_size,
+                    rank=rank,
+                    shuffle=ds_shuffle,
+                    seed=self.seed,
+                )
                 # Note: SamplerWrapper will call set_epoch on the sampler (if defined),
                 # and auto-increment the epoch each time the node is reset.
                 node = SamplerWrapper(sampler)
@@ -903,7 +821,7 @@ class FullFinetuneRecipeDistributed(FTRecipeInterface):
                 node, map_fn=transform, num_workers=ds_num_workers, method=ds_parallel_method
             )
             datasets[key] = node
-            len_datasets += int(len_dataset)
+            len_datasets += int(len_dataset * weights[key])
 
         # Instantiate collate_fn
         if "left_pad_sequence" in collate_fn:
@@ -941,6 +859,10 @@ class FullFinetuneRecipeDistributed(FTRecipeInterface):
 
         utils.log_rank_zero(log, "TorchData nodes are initialized")
 
+        # Restore dataloader state if provided
+        if dataloader_state_dict is not None:
+            loader.load_state_dict(dataloader_state_dict)
+
         return loader, len_datasets
 
 
@@ -965,20 +887,13 @@ class FullFinetuneRecipeDistributed(FTRecipeInterface):
 
         self._profiler.start()
         # self.epochs_run should be non-zero when we're resuming from a checkpoint
-        # 1) iterator를 한 번만 만듭니다
-        data_iter = iter(self._dataloader)
-        # 2) epoch 루프
         for curr_epoch in range(self.epochs_run, self.total_epochs):
             pbar = tqdm(total=self._steps_per_epoch, disable=not self._is_rank_zero)
             # self._dataloader.sampler.set_epoch(curr_epoch)
-            # 3) fixed number of steps만큼 반복
-            for idx in range(self._steps_per_epoch):
-                try:
-                    batch = next(data_iter)
-                except StopIteration:
-                    # 데이터가 끝나면 바로 빠져나가도 되고,
-                    # 또는 원하는 대로 재시작/종료 처리
-                    break
+            for idx, batch in enumerate(self._dataloader):
+                print(f"----- {idx}: {batch['labels'][:80]} -----")
+                sys.exit(1)
+
                 # Start tracking CUDA memory for active steps for just the first epoch
                 if (
                     self._is_rank_zero
@@ -1153,9 +1068,6 @@ class FullFinetuneRecipeDistributed(FTRecipeInterface):
                 ),
                 epoch=curr_epoch,
             )
-            # memory free
-            torch.cuda.empty_cache()
-            gc.collect()
 
         self._profiler.stop()
 

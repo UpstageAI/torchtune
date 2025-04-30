@@ -73,37 +73,44 @@ datasets:
       _component_: torchtune.datasets.multimodal._ufx.ufx_transform
       context_col: "context"
     weight: 1.0
+    ratio: 1.0
   - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-23-shard-1
-      transform:
-        _component_: torchtune.datasets.multimodal._ufx.ufx_transform
-        context_col: "context"
-      weight: 1.0
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0
   - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-23-shard-2
-      transform:
-        _component_: torchtune.datasets.multimodal._ufx.ufx_transform
-        context_col: "context"
-      weight: 1.0
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0
   - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-23-shard-3
-      transform:
-        _component_: torchtune.datasets.multimodal._ufx.ufx_transform
-        context_col: "context"
-      weight: 1.0
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0
   - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-23-shard-4
-      transform:
-        _component_: torchtune.datasets.multimodal._ufx.ufx_transform
-        context_col: "context"
-      weight: 1.0
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0
   - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-23-shard-5
-      transform:
-        _component_: torchtune.datasets.multimodal._ufx.ufx_transform
-        context_col: "context"
-      weight: 1.0
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0
   # Validation set 으로 활용하기 위해서 제외
   # - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-23-shard-6
-  #     transform:
-  #       _component_: torchtune.datasets.multimodal._ufx.ufx_transform
-  #       context_col: "context"
-  #     weight: 1.0
+  #   transform:
+  #     _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+  #     context_col: "context"
+  #   weight: 1.0
+  #ratio: 1.0
 
 # Fine-tuning arguments
 epochs: 1
