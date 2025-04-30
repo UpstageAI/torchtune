@@ -6,42 +6,38 @@
 import os
 import sys
 import time
-
 from functools import partial
 from typing import Any, Dict, List, Optional, Union
 from warnings import warn
 
 import torch
+from datasets import load_dataset, load_from_disk
+from datasets.distributed import split_dataset_by_node
 from omegaconf import DictConfig, ListConfig
-
 from torch import nn
 from torch.distributed import destroy_process_group, init_process_group
 from torch.distributed._tensor import DTensor
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.optim import Optimizer
-from torchdata.nodes import (
-    Loader, StopCriteria, IterableWrapper, ParallelMapper, SamplerWrapper
-)
+from torch.utils.data import DistributedSampler
+from torchdata.nodes import (IterableWrapper, Loader, ParallelMapper,
+                             SamplerWrapper, StopCriteria)
+from tqdm import tqdm
+
 from torchtune import config, modules, training, utils
 from torchtune.config._utils import _get_component_from_path
-
 from torchtune.data import padded_collate_packed
-from torchtune.data._utils import get_dataloader, get_multi_dataset, chain
+from torchtune.data._utils import chain, get_dataloader, get_multi_dataset
 from torchtune.datasets._sft import SFTTransform
 from torchtune.recipe_interfaces import FTRecipeInterface
-from torchtune.training import DummyProfiler, PROFILER_KEY
-from torchtune.training.activations import apply_selective_activation_checkpointing
-from torchtune.utils import get_world_size_and_rank
-from datasets import load_dataset, load_from_disk
-from datasets.distributed import split_dataset_by_node
-from torch.utils.data import DistributedSampler
+from torchtune.training import PROFILER_KEY, DummyProfiler
+from torchtune.training.activations import \
+    apply_selective_activation_checkpointing
 from torchtune.training.checkpointing._checkpoint_client import (
-    CheckpointClient,
-    TrainingProgress,
-)
+    CheckpointClient, TrainingProgress)
 from torchtune.training.lr_schedulers import get_lr
+from torchtune.utils import get_world_size_and_rank
 
-from tqdm import tqdm
 log = utils.get_logger("DEBUG")
 
 
@@ -781,6 +777,10 @@ class FullFinetuneRecipeDistributed(FTRecipeInterface):
                 dataset = load_dataset(source, **cfg_dataset)
             if "filter_fn" in cfg_dataset:
                 dataset = dataset.filter(cfg_dataset.pop("filter_fn"))
+
+            ratio = cfg_dataset.get("ratio", 1.0)
+            if ratio < 1.0:
+                dataset = dataset.select(range(int(len(dataset) * ratio)))
 
             world_size, rank = get_world_size_and_rank()
             len_dataset = len(dataset) // world_size
