@@ -200,7 +200,7 @@ datasets:
       _component_: torchtune.datasets.multimodal._ufx.ufx_transform
       context_col: "context"
     weight: 1.0
-    ratio: 1.0
+    ratio: 0.1 # 8M => 800K due to similar fomats
 
 # Fine-tuning arguments
 epochs: 1
