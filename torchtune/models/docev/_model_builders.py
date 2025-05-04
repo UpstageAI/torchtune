@@ -78,6 +78,7 @@ def docev_preview(
     decoder_trainable: bool,
     encoder_trainable: Union[bool, Dict[str, bool]],
     fusion_trainable: bool,
+    max_num_tiles: int,
 ) -> EarlyFusionModel:
     """DocEV Preview model based on Llama 3.2 Vision architecture
 
@@ -110,7 +111,7 @@ def docev_preview(
         connector_type="ldp_v2",
         vision_feature_select_strategy="full",
         tile_size=560,
-        max_num_tiles=9,
+        max_num_tiles=max_num_tiles,
         in_channels=3,
     )
     # solar mini hyper-parameters
