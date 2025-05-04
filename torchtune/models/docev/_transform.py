@@ -71,7 +71,7 @@ class DocEVTransform(ModelTokenizer, Transform):
         patch_size: int,
         max_num_tiles: int,
         min_num_tiles: int = 1,
-        vision_feature_select_strategy: Literal["default", "full"] = "default",
+        vision_feature_select_strategy: Literal["default", "full"] = "full",
         sampling_ratio: List[int] = [2, 3],
         apply_random_sampling_ratio: bool = True,
         max_seq_len: Optional[int] = None,
@@ -92,6 +92,7 @@ class DocEVTransform(ModelTokenizer, Transform):
             for j in tile_range
             if min_num_tiles <= i * j and i * j <= max_num_tiles
         ]
+
         self.image_processor = LlavaNextImageProcessor.from_pretrained(
                     model_name_or_path,
                     crop_size={"height": tile_size, "width": tile_size},
