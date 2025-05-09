@@ -124,7 +124,7 @@ class ModelType(Enum):
     CLIP_TEXT: str = "clip_text"
     T5_ENCODER: str = "t5_encoder"
     DOCEV: str = "docev"
-
+    DOCEV_PHI4_MINI: str = "docev_phi4_mini"
 
 class FormattedCheckpointFiles:
     """
