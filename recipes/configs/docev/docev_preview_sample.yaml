@@ -57,6 +57,7 @@ dataloader:
 seed: 42 # random seed
 
 datasets:
+  merge_datasets: True
   - source: /app/docfm/datasets/public_dataset/vl3_syn7m/raw_ufx # source of the dataset
     transform:
       _component_: torchtune.datasets.multimodal._ufx.ufx_transform # transform to use for the dataset

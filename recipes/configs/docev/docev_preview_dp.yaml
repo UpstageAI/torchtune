@@ -1,0 +1,235 @@
+# configs/docev/docev_preview_dp.yaml
+# ---------------------------------------------------------
+#
+# To launch on {1, 2, 4, 8} GPUs:
+#   torchrun --nproc_per_node {1, 2, 4, 8} recipes/dev/full_finetune_distributed_ufx_dataset.py --config recipes/configs/docev/docev_preview_dp.yaml
+#   torchrun --nproc_per_node 8 recipes/dev/full_finetune_distributed_ufx_dataset.py --config recipes/configs/docev/docev_preview_dp.yaml
+#
+# ---------------------------------------------------------
+
+# Logging
+metric_logger:
+  _component_: torchtune.training.metric_logging.WandBLogger
+  log_dir: ${output_dir}/logs
+  project: torchtune
+  group: docev_dp
+  name: docevdp_sft_32k_max_tile_12_gc_bucket_8_gpu_56
+log_every_n_steps: 1
+log_peak_memory_stats: True
+
+# Output directory
+output_dir: /app/docfm/checkpoints/training/torchtune/docevdp_sft_32k_max_tile_12_gc_bucket_8_gpu_56
+
+# Model arguments
+model:
+  _component_: torchtune.models.docev.docev_preview
+  image_token_id: 64000 # image token id for the tokenizer
+  decoder_trainable: True # whether to train the decoder
+  encoder_trainable: True # whether to train the encoder
+  fusion_trainable: True # whether to train the fusion layers (additional token embeddings and connector)
+  max_num_tiles: 12
+
+# Model Transform
+tokenizer:
+  _component_: torchtune.models.docev.docev_preview_transform # transform data to message
+  model_name_or_path: /app/docfm/checkpoints/release_models/docev-11.6b-32k-1.0.0-preview
+  image_token: "<image>" # image token for the tokenizer
+  stop_tokens: ["<|im_end|>"] # stop tokens for the tokenizer
+  tile_size: 560 # side length of each square tile for image tiling
+  patch_size: 14 # size of patches for vision encoder convolution; reduces tile dimension to tile_size//patch_size
+  max_num_tiles: 12 # maximum number of tiles to use for image tiling
+  min_num_tiles: 1 # minimum number of tiles to use for image tiling
+  vision_feature_select_strategy: "full" # determines how vision encoder features are used: "full" uses all features, alternative would use only CLS token (index 0) and subset of features [1:]
+  sampling_ratio: [2, 3] # possible avg pooling sizes to apply to connector output for reducing feature dimensions
+  apply_random_sampling_ratio: True # if True, randomly selects between pooling sizes in sampling_ratio; if False, always uses sampling_ratio[0]
+  max_seq_len: 32768
+  chat_template: "{% set image_count = namespace(value=0) %}{% for message in messages %}{% if loop.first and message['role'] != 'system' %}{% endif %}<|im_start|>{{ message['role'] }}\n{% if message['role'] == 'assistant' %}{% generation %}{% if message['content'] is string %}{{ message['content'] }}{% else %}{% for content in message['content'] %}{% if content['type'] == 'image' or 'image' in content or 'image_url' in content %}{% set image_count.value = image_count.value + 1 %}{% if add_vision_id %}Picture {{ image_count.value }}: {% endif %}<image>{% elif 'text' in content %}{{ content['text'] }}{% endif %}{% endfor %}{% endif %}{% endgeneration %}<|im_end|>\n{% else %}{% if message['content'] is string %}{{ message['content'] }}<|im_end|>\n{% else %}{% for content in message['content'] %}{% if content['type'] == 'image' or 'image' in content or 'image_url' in content %}{% set image_count.value = image_count.value + 1 %}{% if add_vision_id %}Picture {{ image_count.value }}: {% endif %}<image>{% elif 'text' in content %}{{ content['text'] }}{% endif %}{% endfor %}<|im_end|>\n{% endif %}{% endif %}{% endfor %}{% if add_generation_prompt %}<|im_start|>assistant\n{% generation %}{% endgeneration %}{% endif %}"
+  ufx_type: "instruction" # pretraining or instruction, # In pretraining mode, all messages in the chat template are concatenated into a single continuous text stream (i.e., flattened) for model input.
+
+# Checkpointer
+checkpointer:
+  _component_: torchtune.training.FullModelHFCheckpointer
+  checkpoint_dir: /app/docfm/checkpoints/release_models/docev-11.6b-32k-1.0.0-preview # checkpoint directory to load
+  checkpoint_files:
+    filename_format: model-{}-of-{}.safetensors # format of the checkpoint files
+    max_filename: "00010" # maximum number of checkpoint files
+  recipe_checkpoint: null # checkpoint directory to load recipe from
+  output_dir: ${output_dir} # output directory to save checkpoints
+  model_type: DOCEV # torchtune.training.checkpointing._utils.ModelType edit
+resume_from_checkpoint: False # whether to resume from checkpoint
+
+# TorchData setup
+dataloader:
+  merge_datasets: True # whether to merge the datasets
+  bucket_ratio: 8 # multiplier used to calculate bucket_size = world_size * batch_size * bucket_ratio, balancing padding efficiency (smaller values) against sequence-length diversity (larger values). if 0, no bucket sampling is used.
+  shuffle: True # whether to shuffle the data
+  collate_fn: torchtune.models.docev._collate.padded_collate_tiled_images_and_mask # collate function to use
+  parallel_method: thread # method to use for parallelism. Default is "thread".
+  num_workers: 4  # Number of workers to use for loading the dataset. Default is 0 (no parallelism). Setting this
+  pin_memory: true # whether to pin memory. Default is False.
+  packed: False # Set to true for great speed ups
+  prefetch_factor: 4 # number of batches to prefetch. Default is 4.
+seed: 42 # random seed
+
+datasets:
+  # - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-23-shard-6
+  #   transform:
+  #     _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+  #     context_col: "context"
+  #   weight: 1.0
+  #   ratio: 1.0 # 654,538  ----------------------------> validation set
+  - source: /app/docfm/datasets/document_datasets/IDL/ufx/instruction_finetuning_docevdp/form_1M
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0 # 1,004,253
+  - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-23-shard-0
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0 # 2,993,188
+  - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-23-shard-1
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0 # 2,864,702
+  - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-23-shard-2
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0 # 2,912,537
+  - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-23-shard-3
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0 # 2,809,366
+  - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-23-shard-4
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0 # 2,540,338
+  - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-23-shard-5
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0 # 2,372,725
+  - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-14-shard-0
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0 # 2,327,752
+  - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-14-shard-1
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0 # 2,305,934
+  - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-14-shard-2
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0 # 2,374,611
+  - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-14-shard-3
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0 # 2,187,898
+  - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-14-shard-4
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0 # 2,317,153
+  - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-14-shard-5
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0 # 2,488,607
+  - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-14-shard-6
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0 # 1,166,981
+  - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-06-shard-0
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0 # 2,298,974
+  - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-06-shard-1
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0 # 2,239,884
+  - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-06-shard-2
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0 # 2,260,851
+  - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-06-shard-3
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0 # 2,224,949
+  - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-06-shard-4
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0 # 2,185,291
+  - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-06-shard-5
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0 # 2,159,407
+  - source: /app/docfm/datasets/document_datasets/mint-1t/pdf/ufx/instruction_finetuning_docevdp/CC-MAIN-2023-06-shard-6
+    transform:
+      _component_: torchtune.datasets.multimodal._ufx.ufx_transform
+      context_col: "context"
+    weight: 1.0
+    ratio: 1.0 # 1,078,791
+
+# Fine-tuning arguments
+epochs: 25 # 약 45M = 1.8M * 25 epoch
+# max_steps_per_epoch is required for progress bar
+max_steps_per_epoch: 500 # 약 1.8M = gpu 56 * gradient_accumulation_steps 64 * 500 = 1,792,000
+batch_size: 1 # support batch_size 1 only
+gradient_accumulation_steps: 64
+optimizer:
+  _component_: torch.optim.AdamW
+  fused: True
+  weight_decay: 0.0
+  lr: 1e-5
+optimizer_in_bwd: False  # True saves memory. Requires gradient_accumulation_steps=1
+
+lr_scheduler:
+  _component_: torchtune.training.lr_schedulers.get_cosine_schedule_with_warmup
+  num_warmup_steps: 10
+
+loss:
+  _component_: torchtune.modules.loss.CEWithChunkedOutputLoss
+clip_grad_norm: 1.0
+compile: True # pytorch compile, set to true for perf/memory improvement
+
+# Training env
+device: cuda
+
+# Memory management
+enable_activation_checkpointing: True
+dtype: bf16
