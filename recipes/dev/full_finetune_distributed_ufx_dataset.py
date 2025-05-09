@@ -48,13 +48,104 @@ log = utils.get_logger("DEBUG")
 class DistributedBucketSampler(Sampler):
     """
     버킷 배칭 + 다중 노드 분할 샘플러
-    - lengths: dataset['length']
-    - batch_size: 노드당 batch size
-    - world_size, rank: 분산 환경 정보
-    - bucket_size: 버킷당 (world_size * batch_size * bucket_mul)
-    - shuffle: epoch마다 셔플
-    - seed: 기본 시드
+
+    Example (world_size=2, batch_size=2, grad_acc_steps=2, bucket_mul=1 → bucket_size=4, seed=0, epoch=0):
+
+    1. 정렬 (sort by length)
+
+    ```python
+    sorted_idx = [0, 1, 2, 3, 4, 5, 6, 7,
+                  8, 9,10,11,12,13,14,15]
+    ```
+
+    2. 버킷 분할 (bucket_size=4)
+
+    ```python
+    buckets = [
+      [ 0,  1,  2,  3],
+      [ 4,  5,  6,  7],
+      [ 8,  9, 10, 11],
+      [12, 13, 14, 15]
+    ]
+    ```
+
+    3. 버킷 순서 셔플
+
+    ```python
+    random.seed(seed + epoch)  # = random.seed(0)
+    random.shuffle(buckets)
+    # → buckets becomes:
+    # [
+    #   [ 8,  9, 10, 11],
+    #   [ 0,  1,  2,  3],
+    #   [ 4,  5,  6,  7],
+    #   [12, 13, 14, 15]
+    # ]
+    ```
+
+    4. 각 버킷 내부 셔플
+
+    ```python
+    for b in buckets:
+        random.shuffle(b)
+    # → buckets ≈
+    # [
+    #   [ 8,  9, 11, 10],
+    #   [ 0,  2,  1,  3],
+    #   [ 5,  4,  7,  6],
+    #   [14, 12, 15, 13]
+    # ]
+    ```
+
+    5. 배치 단위 분할 (batch_size=2, 완전 배치만)
+
+    ```python
+    batches = [
+      [ 8,  9], [11, 10],
+      [ 0,  2], [ 1,  3],
+      [ 5,  4], [ 7,  6],
+      [14, 12], [15, 13]
+    ]
+    ```
+
+    6. 노드별 할당 (world_size=2)
+
+    ```python
+    # rank=0 → batches[0::2]
+    [[ 8,  9], [ 0,  2], [ 5,  4], [14, 12]]
+
+    # rank=1 → batches[1::2]
+    [[11, 10], [ 1,  3], [ 7,  6], [15, 13]]
+    ```
+
+    7. gradient accumulation steps = 2 적용 시
+
+    ```
+    # Step 1
+    1. 첫 번째 update cycle : device 0, 1 간 length는 비슷하게 분포.
+    Device 0 (rank 0) : [8, 9]
+    Device 1 (rank 1) : [11, 10]
+
+    2. 두 번째 update cycle : update cycle 당 동일 device의 seq length는 random하게 분포.
+    Device 0 (rank 0) : [0, 2]
+    Device 1 (rank 1) : [1, 3]
+
+    # Step 2
+    1. 첫 번째 update cycle
+    Device 0 (rank 0) : [5, 4]
+    Device 1 (rank 1) : [7, 6]
+
+    2. 두 번째 update cycle
+    Device 0 (rank 0) : [14, 12]
+    Device 1 (rank 1) : [15, 13]
+
+    ```
+
+    위 예시는 gradient_accumulation_steps=2를 적용할 때,
+    한 update cycle(2 micro-batch)마다 device 0과 1이 동일한 bucket(비슷한 길이)에서
+    micro-batch를 가져오면서도, batch 내부에서는 shuffle로 randomness가 유지됨을 보여줍니다.
     """
+
     def __init__(self,
                  lengths,
                  batch_size: int,
@@ -299,15 +390,6 @@ class FullFinetuneRecipeDistributed(FTRecipeInterface):
                 raise RuntimeError(
                     "enable_activation_offloading should only be True when enable_activation_checkpointing is True"
                 )
-        elif (
-            self._enable_activation_checkpointing
-            and cfg.checkpointer.model_type != "LLAMA3_VISION"
-        ):
-            utils.log_rank_zero(
-                log,
-                "Hint: enable_activation_checkpointing is True, but enable_activation_offloading isn't. "
-                "Enabling activation offloading should reduce memory further.",
-            )
 
         # These are public properties which are updated by the checkpoint loader
         # when ``resume_from_checkpoint`` is `True` or validated in tests
@@ -353,6 +435,8 @@ class FullFinetuneRecipeDistributed(FTRecipeInterface):
                         f"using the config value: {self.total_epochs}"
                     )
                 )
+            if self._is_rank_zero:
+                log.info(f"Epochs run: {self.epochs_run}, Total epochs: {self.total_epochs}")
 
         except KeyError as e:
             raise KeyError(
