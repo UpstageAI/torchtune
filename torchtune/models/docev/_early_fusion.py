@@ -10,7 +10,7 @@ import torch
 from torch import nn
 from torchtune.modules import TransformerDecoder
 from torchtune.modules.model_fusion._fusion_utils import get_fusion_params
-from torchtune.modules.peft._utils import set_trainable_params
+from torchtune.modules.peft._utils import get_adapter_params, set_trainable_params
 
 
 class EarlyFusionModel(nn.Module):
@@ -85,19 +85,36 @@ class EarlyFusionModel(nn.Module):
 
         trainable_params = set()
         if encoder_trainable:
-            trainable_params |= {
-                f"encoder.{n}" for n, p in self.encoder.named_parameters()
-            }
+            adapter_params = get_adapter_params(self.encoder)
+            if adapter_params:
+                # lora
+                trainable_params |= {
+                    f"encoder.{n}" for n, p in adapter_params.items()
+                }
+            else:
+                # full
+                trainable_params |= {
+                    f"encoder.{n}" for n, p in self.encoder.named_parameters()
+                }
         if decoder_trainable:
-            trainable_params |= {
-                f"decoder.{n}" for n, p in self.decoder.named_parameters()
-            }
+            adapter_params = get_adapter_params(self.decoder)
+            if adapter_params:
+                # lora
+                trainable_params |= {
+                    f"decoder.{n}" for n, p in adapter_params.items()
+                }
+            else:
+                # full
+                trainable_params |= {
+                    f"decoder.{n}" for n, p in self.decoder.named_parameters()
+                }
         if fusion_trainable:
             trainable_params |= set(get_fusion_params(self))
         else:
             trainable_params -= set(get_fusion_params(self))
 
         set_trainable_params(self, trainable_params)
+
 
     def set_num_output_chunks(self, num_output_chunks: int) -> None:
         """Used to save memory in combination with :class:`~torchtune.modules.loss.CEWithChunkedOutputLoss`.

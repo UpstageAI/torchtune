@@ -526,6 +526,10 @@ def load_from_full_optimizer_state_dict(
                 if pid not in state:
                     continue
                 param_state = state[pid]
+                if full_pid not in full_state:
+                    # model에 존재하는 weight인데, optimizer에 존재하지 않는 경우 : 학습에서 제외된 weight (예. clip last layer)
+                    print(f"full_pid {full_pid} not in full_state")
+                    continue
                 full_param_state = full_state[full_pid]
                 for attr, full_tensor in full_param_state.items():
                     sharded_tensor = param_state[attr]
