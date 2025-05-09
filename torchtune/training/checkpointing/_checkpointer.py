@@ -663,10 +663,14 @@ class FullModelHFCheckpointer(_CheckpointerInterface):
             converted_state_dict[training.MODEL_KEY] = llama4_hf_to_tune(
                 merged_state_dict,
             )
-        elif self._model_type == ModelType.DOCEV:
-            from torchtune.models.docev._convert_weights import docev_hf_to_tune
-
-            converted_state_dict[training.MODEL_KEY] = docev_hf_to_tune(
+        elif self._model_type == ModelType.DOCEV: # TODO : 추후 DOCEV_SOLAR_MINI 로 변경 필요
+            from torchtune.models.docev._convert_weights import docev_solar_mini_hf_to_tune
+            converted_state_dict[training.MODEL_KEY] = docev_solar_mini_hf_to_tune(
+                merged_state_dict,
+            )
+        elif self._model_type == ModelType.DOCEV_PHI4_MINI:
+            from torchtune.models.docev._convert_weights import docev_phi4_mini_hf_to_tune
+            converted_state_dict[training.MODEL_KEY] = docev_phi4_mini_hf_to_tune(
                 merged_state_dict,
             )
         else:
@@ -713,6 +717,7 @@ class FullModelHFCheckpointer(_CheckpointerInterface):
         Raises:
             ValueError: if ``adapter_only`` is True and adapter checkpoint not found in state_dict.
         """
+
         # convert the state_dict back to hf format; do this inplace
         if not adapter_only:
             if self._model_type in (ModelType.PHI3_MINI, ModelType.PHI4):
@@ -780,10 +785,16 @@ class FullModelHFCheckpointer(_CheckpointerInterface):
                 state_dict[training.MODEL_KEY] = llama4_tune_to_hf(
                     state_dict[training.MODEL_KEY],
                 )
-            elif self._model_type == ModelType.DOCEV:
-                from torchtune.models.docev._convert_weights import docev_tune_to_hf
+            elif self._model_type == ModelType.DOCEV: # TODO : 추후 DOCEV_SOLAR_MINI 로 변경 필요
+                from torchtune.models.docev._convert_weights import docev_solar_mini_tune_to_hf
 
-                state_dict[training.MODEL_KEY] = docev_tune_to_hf(
+                state_dict[training.MODEL_KEY] = docev_solar_mini_tune_to_hf(
+                        state_dict[training.MODEL_KEY],
+                    )
+            elif self._model_type == ModelType.DOCEV_PHI4_MINI:
+                from torchtune.models.docev._convert_weights import docev_phi4_mini_tune_to_hf
+
+                state_dict[training.MODEL_KEY] = docev_phi4_mini_tune_to_hf(
                         state_dict[training.MODEL_KEY],
                     )
             else:
@@ -919,6 +930,16 @@ class FullModelHFCheckpointer(_CheckpointerInterface):
                 logger.warning(
                     "Saving Llama3.2 Vision adapter weights to PEFT format is not supported, saving to torchtune format instead"
                 )
+            elif self._model_type == ModelType.DOCEV: # TODO : 추후 DOCEV_SOLAR_MINI 로 변경 필요
+                from torchtune.models.docev._convert_weights import docev_solar_mini_tune_to_peft_adapter_weights
+
+                state_dict[training.ADAPTER_KEY] = docev_solar_mini_tune_to_peft_adapter_weights(
+                        state_dict[training.ADAPTER_KEY],
+                        fs=self._fs,
+                        safe_serialization=self._safe_serialization,
+                        output_dir=self._output_dir,
+                        epoch=epoch,
+                    )
             else:
                 state_dict[
                     training.ADAPTER_KEY
