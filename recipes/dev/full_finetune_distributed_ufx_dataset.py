@@ -857,6 +857,7 @@ class FullFinetuneRecipeDistributed(FTRecipeInterface):
                 dataset = dataset.select(range(int(len(dataset) * ratio)))
 
             if merge_datasets:
+                # Collect all datasets and concatenate them before proceeding with further processing
                 dataset_list.append(dataset)
                 # last dataset
                 if idx + 1 == len(cfg_datasets):
