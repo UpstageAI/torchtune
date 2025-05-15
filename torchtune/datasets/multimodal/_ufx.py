@@ -116,7 +116,10 @@ class UfxToMessages(Transform):
 
         # Build message list
         raw_context = sample[self._column_map["context"]]
-        messages = self._build_messages(raw_context, images)
+        messages, is_valid_message = self._build_messages(raw_context, images)
+        if not is_valid_message:
+            print(f"Invalid message: sample {sample}")
+            valid_data = False
 
         # Prepend system prompt if provided
         if self.new_system_prompt:
@@ -147,12 +150,15 @@ class UfxToMessages(Transform):
     def _build_messages(self, context: List[Dict[str, Any]], images: List[Any]) -> List[Message]:
         messages = []
         ufx_type = self.ufx_type[self._column_map["context"]]
+        is_valid_message = True
         for entry in context:
             role, content_items = self._interpret_entry(entry, ufx_type)
-            content, masked = self._assemble_content(content_items, images, role)
+            content, masked, is_image_count_equal = self._assemble_content(content_items, images, role)
             msg = Message(role=role, content=content, masked=masked)
             messages.append(msg)
-        return messages
+            if not is_image_count_equal:
+                is_valid_message = False
+        return messages, is_valid_message
 
     def _interpret_entry(self, entry: Dict[str, Any], ufx_type: str) -> Tuple[str, Any]:
         if ufx_type == "instruction":
@@ -166,28 +172,43 @@ class UfxToMessages(Transform):
     def _assemble_content(self, content_item: Any, images: List[Any], role: str) -> Tuple[List[Dict[str, Any]], bool]:
         content_list = []
         masked = role != "assistant"
-
+        is_image_count_equal = True
         if isinstance(content_item, str):  # format type 1
             image_count = content_item.count(self.image_special_token)
-            if image_count and len(images) == image_count:
-                for _ in range(image_count):
-                    content_list.append({"type": "image", "content": images.pop(0)})
+            if image_count > 0:
+                if len(images) != image_count:
+                    is_image_count_equal = False
+                else:
+                    try:
+                        for _ in range(image_count):
+                            content_list.append({"type": "image", "content": images.pop(0)})
+                    except Exception as e:
+                        print(f"Error loading image: {e}")
+                        is_image_count_equal = False
+
                 content_item = content_item.replace(self.image_special_token, "")
             content_list.append({"type": "text", "content": content_item})
         elif isinstance(content_item, list):  # format type 2
             expected_imgs = sum(1 for c in content_item if c.get("type") == "image")
-            if expected_imgs and len(images) == expected_imgs:
+            if expected_imgs > 0:
+                if len(images) != expected_imgs:
+                    is_image_count_equal = False
                 for part in content_item:
                     if part.get("type") == "image":
-                        content_list.append({"type": "image", "content": images.pop(0)})
+                        try:
+                            content_list.append({"type": "image", "content": images.pop(0)})
+                        except Exception as e:
+                            print(f"Error loading image: {e}")
+                            is_image_count_equal = False
                     else:
                         content_list.append({"type": "text", "content": part.get("content", "")})
             else:
-                raise ValueError("Image count mismatch")
+                for part in content_item:
+                    content_list.append({"type": "text", "content": part.get("content", "")})
         else:
             raise ValueError(f"Unsupported content_item type: {type(content_item)}")
 
-        return content_list, masked
+        return content_list, masked, is_image_count_equal
 
 
 def ufx_dataset(
