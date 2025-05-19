@@ -7,7 +7,7 @@
 from torch import nn
 from functools import partial
 from typing import List, Optional, Dict, Tuple, Literal, Union
-
+from torchtune.models.phi3._component_builders import lora_phi3, phi3
 from torchtune.models.docev._component_builders import (  # noqa
     docev_encoder_with_connector,
     docev_solar_decoder,
@@ -140,14 +140,15 @@ def docev_preview(
 def lora_docev_preview(
     lora_attn_modules: List[LORA_ATTN_MODULES],
     image_token_id: int,
-    decoder_trainable: str = "frozen",
-    encoder_trainable: str = "lora",
-    fusion_trainable: str = "lora",
-    apply_lora_to_mlp: bool = False,
-    apply_lora_to_output: bool = False,
-    lora_rank: int = 8,
-    lora_alpha: float = 16,
-    lora_dropout: float = 0.0,
+    max_num_tiles: int,
+    decoder_trainable: str,
+    encoder_trainable: str,
+    fusion_trainable: str,
+    apply_lora_to_mlp: bool,
+    apply_lora_to_output: bool,
+    lora_rank: int,
+    lora_alpha: float,
+    lora_dropout: float,
     use_dora: bool = False,
     quantize_base: bool = False,
 ) -> EarlyFusionModel:
@@ -185,65 +186,97 @@ def lora_docev_preview(
     decoder_type = LoRATrainable(decoder_trainable.lower())
     encoder_type = LoRATrainable(encoder_trainable.lower())
     fusion_type = LoRATrainable(fusion_trainable.lower())
-    assert LoRATrainable.FULL not in [
-        decoder_type,
-        encoder_type,
-        fusion_type,
-    ], "We've temporarily removed support for mixed LoRA + Full Finetuning yet. Please don't use the 'full' option and use llama3_2_vision_11b if you need full finetuning"
 
-    encoder = lora_docev_encoder_with_connector(
-        encoder_lora=encoder_type == LoRATrainable.LORA,
-        fusion_lora=fusion_type == LoRATrainable.LORA,
-        lora_attn_modules=lora_attn_modules,
-        apply_lora_to_mlp=apply_lora_to_mlp,
-        apply_lora_to_output=apply_lora_to_output,
-        patch_size=14,
-        num_heads=16,
-        attn_bias=True,
-        use_rope=False,
-        activation=nn.GELU,
-        clip_embed_dim=1152,
-        clip_hidden_dim=4304,
-        clip_num_layers=27,
-        clip_hidden_states=[24, 25, 26],
-        cls_output_dim=1152,
-        append_cls_token=False,
-        output_cls_projection=False,
-        decoder_embed_dim=4096,
-        vision_select_layer=-2,
-        tile_size=560,
-        max_num_tiles=9,
-        in_channels=3,
-        lora_rank=lora_rank,
-        lora_alpha=lora_alpha,
-        lora_dropout=lora_dropout,
-        use_dora=use_dora,
-        quantize_base=quantize_base,
-        connector_type="ldp_v2",
-        vision_feature_select_strategy="full",
-    )
-
-    decoder = lora_docev_solar_decoder(
-        lora_attn_modules=lora_attn_modules,
-        apply_lora_to_mlp=apply_lora_to_mlp,
-        apply_lora_to_output=apply_lora_to_output,
-        vocab_size=64000,
-        fusion_vocab_size=64,
-        num_layers=48,
-        num_heads=32,
-        num_kv_heads=8,
-        embed_dim=4096,
-        max_seq_len=65536,
-        intermediate_dim=14336,
-        attn_dropout=0.0,
-        norm_eps=1e-5,
-        rope_base=1000000.0,
-        lora_rank=lora_rank,
-        lora_alpha=lora_alpha,
-        lora_dropout=lora_dropout,
-        use_dora=use_dora,
-        quantize_base=quantize_base,
-    )
+    if encoder_type == LoRATrainable.LORA:
+        encoder = lora_docev_encoder_with_connector(
+            encoder_lora=encoder_type == LoRATrainable.LORA,
+            fusion_lora=fusion_type == LoRATrainable.LORA,
+            lora_attn_modules=lora_attn_modules,
+            apply_lora_to_mlp=apply_lora_to_mlp,
+            apply_lora_to_output=apply_lora_to_output,
+            patch_size=14,
+            num_heads=16,
+            attn_bias=True,
+            use_rope=False,
+            activation=nn.GELU,
+            clip_embed_dim=1152,
+            clip_hidden_dim=4304,
+            clip_num_layers=27,
+            clip_hidden_states=[24, 25, 26],
+            cls_output_dim=1152,
+            append_cls_token=False,
+            output_cls_projection=False,
+            decoder_embed_dim=4096,
+            vision_select_layer=-2,
+            tile_size=560,
+            max_num_tiles=max_num_tiles,
+            in_channels=3,
+            lora_rank=lora_rank,
+            lora_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+            use_dora=use_dora,
+            quantize_base=quantize_base,
+            connector_type="ldp_v2",
+            vision_feature_select_strategy="full",
+        )
+    else:
+        encoder = docev_encoder_with_connector(
+            patch_size=14,
+            num_heads=16,
+            attn_bias=True, # q,k,v,out proj bias
+            use_rope=False,
+            activation=nn.GELU,
+            clip_embed_dim=1152,
+            clip_hidden_dim=4304,
+            clip_num_layers=27,
+            clip_hidden_states=[24, 25, 26], # possible range: 0 ~ clip_num_layers-1
+            cls_output_dim=1152,
+            append_cls_token=False,
+            output_cls_projection=False,
+            decoder_embed_dim=4096,
+            vision_select_layer=-2,
+            connector_type="ldp_v2",
+            vision_feature_select_strategy="full",
+            tile_size=560,
+            max_num_tiles=max_num_tiles,
+            in_channels=3,
+        )
+    if decoder_type == LoRATrainable.LORA:
+        decoder = lora_docev_solar_decoder(
+            lora_attn_modules=lora_attn_modules,
+            apply_lora_to_mlp=apply_lora_to_mlp,
+            apply_lora_to_output=apply_lora_to_output,
+            vocab_size=64000,
+            fusion_vocab_size=64,
+            num_layers=48,
+            num_heads=32,
+            num_kv_heads=8,
+            embed_dim=4096,
+            max_seq_len=65536,
+            intermediate_dim=14336,
+            attn_dropout=0.0,
+            norm_eps=1e-5,
+            rope_base=1000000.0,
+            lora_rank=lora_rank,
+            lora_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+            use_dora=use_dora,
+            quantize_base=quantize_base,
+        )
+    else:
+        decoder = docev_solar_decoder(
+            vocab_size=64000,
+            fusion_vocab_size=64,
+            num_layers=48,
+            num_heads=32,
+            num_kv_heads=8,
+            embed_dim=4096,
+            max_seq_len=65536,
+            intermediate_dim=14336,
+            attn_dropout=0.0,
+            norm_eps=1e-5,
+            rope_base=1000000.0,
+        )
 
     return EarlyFusionModel(
         encoder=encoder,
@@ -252,6 +285,68 @@ def lora_docev_preview(
         encoder_trainable=encoder_type != LoRATrainable.FROZEN,
         decoder_trainable=decoder_type != LoRATrainable.FROZEN,
         fusion_trainable=fusion_type != LoRATrainable.FROZEN,
+    )
+
+def docev_phi4_mini(
+    image_token_id: int,
+    decoder_trainable: bool,
+    encoder_trainable: Union[bool, Dict[str, bool]],
+    fusion_trainable: bool,
+    max_num_tiles: int,
+) -> EarlyFusionModel:
+    """DocEV Preview model based on Phi4 architecture
+
+    Args:
+        image_token_id (int): Token ID used to represent images in the input
+        decoder_trainable (bool): Whether to make decoder params trainable
+        encoder_trainable (Union[bool, Dict[str, bool]]): Whether to make encoder params trainable.
+            Can be a boolean or a dictionary specifying trainability for different components
+        fusion_trainable (bool): Whether to make fusion params trainable
+
+    Returns:
+        EarlyFusionModel: Instantiation of the DocEV Preview model
+    """
+    # siglip so-400m & ldp-v2 hyper-parameters
+    encoder = docev_encoder_with_connector(
+        patch_size=14,
+        num_heads=16,
+        attn_bias=True, # q,k,v,out proj bias
+        use_rope=False,
+        activation=nn.GELU,
+        clip_embed_dim=1152,
+        clip_hidden_dim=4304,
+        clip_num_layers=27,
+        clip_hidden_states=[24, 25, 26], # possible range: 0 ~ clip_num_layers-1
+        cls_output_dim=1152,
+        append_cls_token=False,
+        output_cls_projection=False,
+        decoder_embed_dim=3072,
+        vision_select_layer=-2,
+        connector_type="ldp_v2",
+        vision_feature_select_strategy="full",
+        tile_size=560,
+        max_num_tiles=max_num_tiles,
+        in_channels=3,
+    )
+    # phi4 mini hyper-parameters
+    decoder = phi3(
+        vocab_size=200064,
+        num_layers=32,
+        num_heads=24,
+        num_kv_heads=8,
+        embed_dim=3072,
+        intermediate_dim=8192,
+        max_seq_len=131072,
+        attn_dropout=0.0,
+        norm_eps=1e-5,
+    )
+    return EarlyFusionModel(
+        decoder=decoder,
+        encoder=encoder,
+        image_token_id=image_token_id,
+        decoder_trainable=decoder_trainable,
+        encoder_trainable=encoder_trainable,
+        fusion_trainable=fusion_trainable,
     )
 
 

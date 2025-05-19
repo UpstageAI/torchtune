@@ -13,6 +13,7 @@ from torchtune.models.clip._component_builders import (
     clip_vision_encoder,
     lora_clip_vision_encoder,
     lora_clip_mlp,
+    lora_clip_attention,
 )
 
 from torchtune.models.docev._encoder import (
@@ -108,7 +109,6 @@ def docev_ldp_v2_connector(
 
 
 def lora_docev_ldp_v2_connector(
-    lora_modules: List[LORA_ATTN_MODULES],
     *,
     # Connector args
     clip_embed_dim: int,
@@ -461,18 +461,20 @@ def lora_docev_vision_encoder(
     )
 
     # transformer layer
-    self_attn = MultiHeadAttention(
+    self_attn = lora_clip_attention(
+        lora_modules=lora_modules,
         embed_dim=embed_dim,
+        head_dim=head_dim,
         num_heads=num_heads,
         num_kv_heads=num_heads,
-        head_dim=head_dim,
-        q_proj=nn.Linear(embed_dim, embed_dim, bias=attn_bias),
-        k_proj=nn.Linear(embed_dim, embed_dim, bias=attn_bias),
-        v_proj=nn.Linear(embed_dim, embed_dim, bias=attn_bias),
-        output_proj=nn.Linear(embed_dim, embed_dim, bias=attn_bias),
-        pos_embeddings=rope,
         attn_dropout=0.0,
-        is_causal=False,
+        attn_bias=attn_bias,
+        lora_rank=lora_rank,
+        lora_alpha=lora_alpha,
+        lora_dropout=lora_dropout,
+        use_dora=use_dora,
+        quantize_base=quantize_base,
+        **quantization_kwargs,
     )
 
     if apply_lora_to_mlp:
@@ -801,7 +803,7 @@ def lora_docev_encoder_with_connector(
         "hidden_dim": clip_hidden_dim,
         "num_layers": clip_num_layers,
         "num_heads": num_heads,
-        "activation": nn.GELU,
+        "activation": activation,
         "out_indices": clip_hidden_states,
         "max_num_tiles": max_num_tiles,
         "in_channels": in_channels,
@@ -818,14 +820,27 @@ def lora_docev_encoder_with_connector(
     else:
         clip = docev_vision_encoder(**clip_options)
 
-    # Connector
-    connector_type_map = {
-        "ldp_v2": lora_docev_ldp_v2_connector,
-    }
-    connector = connector_type_map[connector_type](
-        clip_embed_dim=clip_embed_dim,
-        decoder_embed_dim=decoder_embed_dim
-    )
+    if fusion_lora:
+        # Connector
+        connector_type_map = {
+            "ldp_v2": lora_docev_ldp_v2_connector,
+        }
+        connector = connector_type_map[connector_type](
+            clip_embed_dim=clip_embed_dim,
+            decoder_embed_dim=decoder_embed_dim,
+            **lora_options
+        )
+    else:
+        # Connector
+        connector_type_map = {
+            "ldp_v2": docev_ldp_v2_connector,
+        }
+        connector = connector_type_map[connector_type](
+            clip_embed_dim=clip_embed_dim,
+            decoder_embed_dim=decoder_embed_dim,
+        )
+
+
 
     encoder = DocEVEncoderWithConnector(
         clip=clip,
@@ -968,7 +983,6 @@ def lora_docev_solar_decoder(
     apply_lora_to_mlp: bool = False,
     apply_lora_to_output: bool = False,
     *,
-    # llama3 args
     vocab_size: int,
     num_layers: int,
     num_heads: int,
@@ -1100,19 +1114,19 @@ def lora_docev_solar_decoder(
         layers.append(layer)
 
     tok_embeddings = FusionEmbedding(vocab_size, fusion_vocab_size, embed_dim)
-
+    output_dim = vocab_size + fusion_vocab_size if fusion_vocab_size > 0 else vocab_size
     # TODO: quantize_base is not applied to final output_proj currently.
     adapter_cls = DoRALinear if use_dora else LoRALinear
     output_proj = (
         adapter_cls(
             embed_dim,
-            vocab_size,
+            output_dim,
             rank=lora_rank,
             alpha=lora_alpha,
             dropout=lora_dropout,
         )
         if apply_lora_to_output
-        else nn.Linear(embed_dim, vocab_size, bias=False)
+        else nn.Linear(embed_dim, output_dim, bias=False)
     )
     model = TransformerDecoder(
         tok_embeddings=tok_embeddings,
